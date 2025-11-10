@@ -3,12 +3,13 @@ import { ChevronDown, ChevronUp, ExternalLink, BookOpen, Calendar, Users, FileTe
 
 interface ResultItemProps {
   article: Article
+  index: number
   expanded: boolean
   onToggle: () => void
   keyword: string
 }
 
-const ResultItem = ({ article, expanded, onToggle, keyword }: ResultItemProps) => {
+const ResultItem = ({ article, index, expanded, onToggle, keyword }: ResultItemProps) => {
   const getRelevanceBadge = (score: number) => {
     if (score >= 70) {
       return <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full">高度相关</span>
@@ -52,8 +53,13 @@ const ResultItem = ({ article, expanded, onToggle, keyword }: ResultItemProps) =
         <div className="flex items-start justify-between">
           <div className="flex-1 mr-4">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {/* 文献编号 */}
+              <span className="px-2.5 py-1 text-sm font-bold bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg shadow-sm">
+                #{index}
+              </span>
               {getRelevanceBadge(article.relevance.score)}
-              {article.has_fulltext && (
+              {/* 只要有fulltext对象就显示全文可用 */}
+              {(article.has_fulltext || article.fulltext) && (
                 <span className="px-2 py-1 text-xs font-semibold bg-purple-100 text-purple-800 rounded-full flex items-center gap-1">
                   <Check className="w-3 h-3" />
                   全文可用

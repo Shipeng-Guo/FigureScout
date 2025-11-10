@@ -216,6 +216,7 @@ def search_literature():
         keyword = data.get('keyword', '')
         years = data.get('years', 3)
         fetch_fulltext = data.get('fetch_fulltext', True)  # 默认获取详细全文分析
+        max_fulltext = data.get('max_fulltext', 20)  # 渐进式加载：初次只处理20篇
         
         if not keyword:
             return jsonify({"error": "关键词不能为空"}), 400
@@ -223,6 +224,7 @@ def search_literature():
         print(f"\n{'='*60}")
         print(f"搜索关键词: {keyword}")
         print(f"时间范围: 近{years}年")
+        print(f"初次全文处理: {max_fulltext}篇")
         print(f"使用 Europe PMC 全文搜索（包括方法、结果章节）")
         print(f"{'='*60}\n")
         
@@ -264,13 +266,15 @@ def search_literature():
         # 获取详细的全文分析（PMC XML 解析）
         if fetch_fulltext:
             pmc_fetcher = PMCFetcher()
-            print(f"开始获取详细全文分析，共 {min(len(articles), 20)} 篇...\n")
+            max_process = min(len(articles), max_fulltext)
+            print(f"开始获取详细全文分析，共 {max_process} 篇...\n")
             
             processed_count = 0
-            for article in articles[:20]:  # 限制前20篇以提高速度
+            for idx, article in enumerate(articles[:max_process], 1):
                 # 跳过没有 PMC ID 的文章
                 if not article.get('pmc_id'):
-                    print(f"⚠️ PMID {article.get('pmid', 'N/A')}: 无PMC ID，跳过")
+                    print(f"[{idx}/{max_process}] ⚠️ PMID {article.get('pmid', 'N/A')}: 无PMC ID，跳过")
+                    # 不修改has_fulltext，保持原值
                     continue
                 
                 try:
@@ -280,9 +284,10 @@ def search_literature():
                         # 合并 Europe PMC 的基本信息和 PMC 的详细分析
                         article['fulltext'] = fulltext_info['fulltext']
                         article['has_fulltext'] = True
+                        article['fulltext_processed'] = True  # 标记已处理
                         
                         mentions = fulltext_info['fulltext']['total_mentions']
-                        print(f"✅ {article['pmc_id']}: 详细分析完成，找到 {mentions} 处提及")
+                        print(f"[{idx}/{max_process}] ✅ {article['pmc_id']}: 找到 {mentions} 处提及")
                         
                         # 基于全文提及次数调整相关性分数
                         if mentions > 0:
@@ -290,11 +295,15 @@ def search_literature():
                         
                         processed_count += 1
                     else:
-                        print(f"⚠️ {article.get('pmc_id', 'N/A')}: 无法获取详细全文")
+                        print(f"[{idx}/{max_process}] ⚠️ {article.get('pmc_id', 'N/A')}: 无法获取详细全文")
+                        # 保持has_fulltext=True，只是暂时没解析成功
+                        article['fulltext_processed'] = False
                 except Exception as e:
-                    print(f"❌ {article.get('pmc_id', 'N/A')}: 处理失败 - {e}")
+                    print(f"[{idx}/{max_process}] ❌ {article.get('pmc_id', 'N/A')}: 处理失败 - {e}")
+                    # 保持has_fulltext=True，只是暂时处理失败
+                    article['fulltext_processed'] = False
             
-            print(f"\n✅ 完成详细分析: {processed_count}/{min(len(articles), 20)} 篇\n")
+            print(f"\n✅ 完成详细分析: {processed_count}/{max_process} 篇\n")
         
         # 按相关性排序
         articles.sort(key=lambda x: x.get('relevance', {}).get('score', 0), reverse=True)
@@ -316,6 +325,7 @@ def search_literature():
         return jsonify({
             "keyword": keyword,
             "total": len(articles),
+            "processed": processed_count if fetch_fulltext else 0,  # 实际处理的全文数量
             "fulltext_available": fulltext_count,
             "search_method": "Europe PMC Full-Text Search",
             "is_truncated": is_truncated,
@@ -328,6 +338,185 @@ def search_literature():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/retry-failed', methods=['POST'])
+def retry_failed():
+    """
+    重新处理失败的文章
+    
+    请求体: {articles: [失败的文章列表], keyword}
+    返回: {processed, failed, results}
+    """
+    try:
+        data = request.get_json()
+        failed_articles = data.get('articles', [])
+        keyword = data.get('keyword', '')
+        
+        if not failed_articles:
+            return jsonify({"processed": 0, "failed": 0, "results": []})
+        
+        print(f"\n{'='*60}")
+        print(f"重新处理失败的文章: 共 {len(failed_articles)} 篇")
+        print(f"{'='*60}\n")
+        
+        pmc_fetcher = PMCFetcher()
+        processed_articles = []
+        processed_count = 0
+        still_failed = 0
+        
+        for idx, article in enumerate(failed_articles, 1):
+            # 如果没有PMC ID，标记为永久失败
+            if not article.get('pmc_id'):
+                print(f"[{idx}/{len(failed_articles)}] ⚠️ PMID {article.get('pmid')}: 无PMC ID，无法处理")
+                article['fulltext_error'] = 'NO_PMC_ID'
+                article['fulltext_processed'] = False
+                processed_articles.append(article)
+                still_failed += 1
+                continue
+            
+            try:
+                fulltext_info = pmc_fetcher.get_fulltext_info(article['pmid'], keyword)
+                if fulltext_info and fulltext_info.get('fulltext'):
+                    article['fulltext'] = fulltext_info['fulltext']
+                    article['has_fulltext'] = True
+                    article['fulltext_processed'] = True
+                    article['fulltext_error'] = None
+                    
+                    mentions = fulltext_info['fulltext']['total_mentions']
+                    print(f"[{idx}/{len(failed_articles)}] ✅ {article['pmc_id']}: 重试成功，找到 {mentions} 处提及")
+                    
+                    if mentions > 0:
+                        article['relevance']['score'] += mentions * 5
+                    
+                    processed_count += 1
+                else:
+                    print(f"[{idx}/{len(failed_articles)}] ⚠️ {article['pmc_id']}: 重试仍失败")
+                    article['fulltext_error'] = 'FETCH_FAILED'
+                    article['fulltext_processed'] = False
+                    still_failed += 1
+            except Exception as e:
+                print(f"[{idx}/{len(failed_articles)}] ❌ {article['pmc_id']}: 重试出错 - {e}")
+                article['fulltext_error'] = str(e)
+                article['fulltext_processed'] = False
+                still_failed += 1
+            
+            processed_articles.append(article)
+        
+        print(f"\n✅ 重试完成: 成功 {processed_count} 篇，仍失败 {still_failed} 篇\n")
+        
+        return jsonify({
+            "processed": processed_count,
+            "failed": still_failed,
+            "results": processed_articles
+        })
+    
+    except Exception as e:
+        print(f"重试错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/continue-fulltext', methods=['POST'])
+def continue_fulltext():
+    """
+    继续处理更多文章的详细全文（渐进式加载）
+    
+    请求体: {keyword, years, start_index, end_index}
+    返回: {processed, start_index, end_index, results}
+    """
+    try:
+        data = request.get_json()
+        keyword = data.get('keyword', '')
+        years = data.get('years', 3)
+        start_idx = data.get('start_index', 0)
+        end_idx = data.get('end_index', 50)
+        
+        if not keyword:
+            return jsonify({"error": "关键词不能为空"}), 400
+        if start_idx < 0 or end_idx <= start_idx:
+            return jsonify({"error": "索引范围无效"}), 400
+        
+        print(f"\n{'='*60}")
+        print(f"继续处理全文: {keyword}")
+        print(f"范围: 第 {start_idx+1} 到 {end_idx} 篇")
+        print(f"{'='*60}\n")
+        
+        # 重新搜索获取文章列表
+        page_size = min(50 * years, 500)
+        europepmc_searcher = EuropePMCSearcher()
+        articles = europepmc_searcher.search_fulltext(
+            keyword=keyword,
+            years=years,
+            journals=HIGH_QUALITY_JOURNALS,
+            page_size=page_size
+        )
+        
+        if not articles or start_idx >= len(articles):
+            return jsonify({
+                "processed": 0,
+                "start_index": start_idx,
+                "end_index": end_idx,
+                "results": []
+            })
+        
+        actual_end = min(end_idx, len(articles))
+        target_articles = articles[start_idx:actual_end]
+        
+        # 处理全文
+        pmc_fetcher = PMCFetcher()
+        processed_articles = []
+        processed_count = 0
+        
+        for idx, article in enumerate(target_articles, start_idx + 1):
+            if not article.get('pmc_id'):
+                print(f"[{idx}/{actual_end}] ⚠️ 无PMC ID，跳过")
+                # 即使没有PMC ID，也保持has_fulltext原值（Europe PMC已设置）
+                processed_articles.append(article)
+                continue
+            
+            try:
+                fulltext_info = pmc_fetcher.get_fulltext_info(article['pmid'], keyword)
+                if fulltext_info and fulltext_info.get('fulltext'):
+                    article['fulltext'] = fulltext_info['fulltext']
+                    article['has_fulltext'] = True
+                    article['fulltext_processed'] = True
+                    
+                    mentions = fulltext_info['fulltext']['total_mentions']
+                    print(f"[{idx}/{actual_end}] ✅ {article['pmc_id']}: 找到 {mentions} 处提及")
+                    
+                    if mentions > 0:
+                        article['relevance']['score'] += mentions * 5
+                    
+                    processed_count += 1
+                else:
+                    print(f"[{idx}/{actual_end}] ⚠️ 无法获取详细全文")
+                    # 保持has_fulltext=True，只是暂时没解析成功
+                    article['fulltext_processed'] = False
+            except Exception as e:
+                print(f"[{idx}/{actual_end}] ❌ 处理失败 - {e}")
+                # 保持has_fulltext=True，只是暂时处理失败
+                article['fulltext_processed'] = False
+            
+            # 无论成功还是失败，都返回文章
+            processed_articles.append(article)
+        
+        print(f"\n✅ 完成增量处理: {processed_count}/{len(target_articles)} 篇\n")
+        
+        return jsonify({
+            "processed": processed_count,
+            "start_index": start_idx,
+            "end_index": actual_end,
+            "results": processed_articles
+        })
+    
+    except Exception as e:
+        print(f"错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 
 def analyze_relevance(article: Dict, keyword: str) -> Dict:
     """

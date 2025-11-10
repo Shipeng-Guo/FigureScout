@@ -16,10 +16,11 @@ const ResultList = ({ results, keyword }: ResultListProps) => {
 
   return (
     <div className="space-y-4">
-      {results.map((article) => (
+      {results.map((article, index) => (
         <ResultItem
           key={article.pmid}
           article={article}
+          index={index + 1}
           expanded={expandedId === article.pmid}
           onToggle={() => toggleExpand(article.pmid)}
           keyword={keyword}
