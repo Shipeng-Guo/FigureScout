@@ -1,6 +1,6 @@
 {
   "name": "figurescout-frontend",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "FigureScout - 文献数据集使用案例检索工具",
   "private": true,
   "scripts": {

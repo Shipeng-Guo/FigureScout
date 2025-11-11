@@ -145,7 +145,10 @@ class EuropePMCSearcher:
                 "date": date_formatted,  # 新增：精确日期YYYYMMDD
                 "doi": result.get("doi"),
                 "keyword": keyword,
-                "has_fulltext": True,  # Europe PMC 搜索结果都有全文
+                # 修改：区分"PMC链接可用"和"已解析全文"
+                "pmc_available": bool(pmc_id),  # 是否有PMC链接
+                "has_fulltext": False,  # 是否已成功解析全文（初始为False）
+                "fulltext_processed": False,  # 是否已尝试处理
                 
                 # Europe PMC 特有：全文匹配信息
                 "fulltext_snippets": []

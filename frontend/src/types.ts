@@ -8,6 +8,7 @@ export interface Article {
   authors: string[]
   doi: string | null
   keyword: string
+  originalIndex?: number  // 🔧 新增：原始序号，用于追踪文章顺序
   relevance: {
     score: number
     mentions: string[]
@@ -16,7 +17,9 @@ export interface Article {
   figures?: Figure[]
   // 全文信息
   pmc_id?: string
-  has_fulltext?: boolean
+  pmc_available?: boolean  // PMC链接是否可用
+  has_fulltext?: boolean  // 是否已成功解析全文
+  fulltext_processed?: boolean  // 是否已尝试处理
   fulltext?: {
     methods?: string
     results?: string

@@ -58,13 +58,18 @@ const ResultItem = ({ article, index, expanded, onToggle, keyword }: ResultItemP
                 #{index}
               </span>
               {getRelevanceBadge(article.relevance.score)}
-              {/* 只要有fulltext对象就显示全文可用 */}
-              {(article.has_fulltext || article.fulltext) && (
+              {/* 显示全文解析状态 */}
+              {article.has_fulltext && article.fulltext ? (
+                <span className="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  已解析全文
+                </span>
+              ) : article.pmc_available ? (
                 <span className="px-2 py-1 text-xs font-semibold bg-purple-100 text-purple-800 rounded-full flex items-center gap-1">
                   <Check className="w-3 h-3" />
-                  全文可用
+                  PMC可用
                 </span>
-              )}
+              ) : null}
               {article.has_fulltext && article.fulltext && article.fulltext.total_mentions > 0 && (
                 <span className="px-2 py-1 text-xs font-semibold bg-orange-100 text-orange-800 rounded-full">
                   {article.fulltext.total_mentions} 处提及
