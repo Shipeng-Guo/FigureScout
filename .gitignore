@@ -74,3 +74,8 @@ coverage/
 *.tmp
 *.temp
 .cache/
+
+# 数据库文件（不应提交到Git）
+backend/*.db
+backend/figurescout_projects.db
+*.db
